@@ -312,8 +312,11 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [customPreview, setCustomPreview] = useState(null);
+  const [isGeneratingChar, setIsGeneratingChar] = useState(false);
 
-  const char = CHARACTERS.find(c => c.id === charId);
+  const char = charId === "custom" ? customPreview : CHARACTERS.find(c => c.id === charId);
 
   const buildPrompt = () => {
     if (!char) return "";
@@ -322,6 +325,68 @@ function App() {
       .replace("{{LOG}}", log)
       .replace("{{DATE_FROM}}", dateFrom)
       .replace("{{DATE_TO}}", dateTo)}`;
+  };
+
+  const generateCustomChar = async () => {
+    if (!customName.trim()) return;
+    if (!apiKey.trim()) {
+      // APIキーなしの場合は汎用プロンプトで仮設定
+      setCustomPreview({
+        id: "custom", name: customName, icon: "✨", color: "blue",
+        borderClass: "border-cyan-500", bgClass: "bg-cyan-950", textClass: "text-cyan-300", btnClass: "from-cyan-700 to-blue-700",
+        description: `「${customName}」風の占い師`,
+        systemPrompt: `あなたは「${customName}」をイメージした占い師です。${customName}らしい口調・性格・価値観で振り返りフィードバックを行ってください。その人物らしい言葉遣いと視点で、良い点は褒め、改善点は率直に指摘し、ラッキーアクティビティを提案してください。`
+      });
+      return;
+    }
+    setIsGeneratingChar(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey.trim(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-6",
+          max_tokens: 800,
+          messages: [{ role: "user", content: `「${customName}」という人物（キャラクター・有名人など）を占い師として設定します。以下のJSON形式のみで返してください。
+
+{
+  "icon": "絵文字1文字",
+  "description": "その人物らしい一言（20文字以内）",
+  "systemPrompt": "あなたは「${customName}」をイメージした占い師です。【口調】（その人物らしい話し方・口癖を具体的に）【性格】（その人物らしい性格・価値観）良い点の褒め方、改善点の指摘の仕方、ラッキーアクティビティの提案の仕方をそれぞれ1〜2文で。"
+}` }]
+        })
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      let t = text.trim();
+      const fenced = t.match(/\`\`\`json?\s*([\s\S]*?)\`\`\`/);
+      if (fenced) t = fenced[1].trim();
+      else { const s = t.indexOf("{"); if (s !== -1) { t = t.substring(s); let d=0,e=-1; for(let i=0;i<t.length;i++){if(t[i]==="{")d++;else if(t[i]==="}"){d--;if(d===0){e=i;break;}}} if(e!==-1)t=t.substring(0,e+1); } }
+      const parsed = JSON.parse(t);
+      setCustomPreview({
+        id: "custom",
+        name: customName,
+        icon: parsed.icon || "✨",
+        color: "blue",
+        borderClass: "border-cyan-500", bgClass: "bg-cyan-950", textClass: "text-cyan-300", btnClass: "from-cyan-700 to-blue-700",
+        description: parsed.description || `「${customName}」風の占い師`,
+        systemPrompt: parsed.systemPrompt || `あなたは「${customName}」をイメージした占い師です。${customName}らしい口調で振り返りフィードバックを行ってください。`
+      });
+    } catch(e) {
+      setCustomPreview({
+        id: "custom", name: customName, icon: "✨", color: "blue",
+        borderClass: "border-cyan-500", bgClass: "bg-cyan-950", textClass: "text-cyan-300", btnClass: "from-cyan-700 to-blue-700",
+        description: `「${customName}」風の占い師`,
+        systemPrompt: `あなたは「${customName}」をイメージした占い師です。${customName}らしい口調・性格・価値観で振り返りフィードバックを行ってください。`
+      });
+    } finally {
+      setIsGeneratingChar(false);
+    }
   };
 
   const callAPI = async () => {
@@ -452,7 +517,39 @@ function App() {
                 </button>
               ))}
             </div>
-            <NavButtons onBack={() => setStep(0)} onNext={() => setStep(2)} nextDisabled={!charId}/>
+
+              {/* カスタムキャラ枠 */}
+              <div className={`w-full p-4 rounded-xl border-2 transition-all ${charId==="custom" && customPreview ? "border-cyan-500 bg-cyan-950" : "border-gray-700 bg-gray-900"}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">✨</span>
+                  <p className="text-gray-300 font-bold text-sm">カスタム占い師（誰に相談したい？）</p>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={customName}
+                    onChange={e => { setCustomName(e.target.value); setCustomPreview(null); if(charId==="custom") setCharId(""); }}
+                    placeholder="例：矢沢永吉、万菊師匠、本田圭佑..."
+                    className="flex-1 bg-black border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-500 placeholder-gray-600"
+                  />
+                  <button onClick={generateCustomChar} disabled={!customName.trim() || isGeneratingChar}
+                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${customName.trim() && !isGeneratingChar ? "bg-cyan-700 hover:bg-cyan-600 text-white" : "bg-gray-800 text-gray-600 cursor-not-allowed"}`}>
+                    {isGeneratingChar ? "⟳" : "生成"}
+                  </button>
+                </div>
+                {customPreview && (
+                  <button onClick={() => setCharId("custom")}
+                    className={`mt-3 w-full text-left p-3 rounded-xl border-2 transition-all flex items-center gap-3 ${charId==="custom" ? "border-cyan-400 bg-cyan-900" : "border-cyan-700 bg-cyan-950 hover:border-cyan-500"}`}>
+                    <span className="text-2xl">{customPreview.icon}</span>
+                    <div className="flex-1">
+                      <p className="text-white font-bold text-sm">{customPreview.name}</p>
+                      <p className="text-cyan-300 text-xs">{customPreview.description}</p>
+                    </div>
+                    {charId==="custom" && <span className="text-green-400">✓</span>}
+                  </button>
+                )}
+              </div>
+            </div>
+            <NavButtons onBack={() => setStep(0)} onNext={() => setStep(2)} nextDisabled={!charId || (charId==="custom" && !customPreview)}/>
           </div>
         );
 
